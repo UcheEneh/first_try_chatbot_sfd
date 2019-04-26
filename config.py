@@ -41,8 +41,10 @@ BUCKETS = [(19, 19), (28, 28), (33, 33), (40, 43), (50, 53), (60, 63)]
     tf.contrib.training.bucket_by_sequence_length(max_length, examples, batch_size, 
     bucket_boundaries, capacity=2 * batch_size, dynamic_pad=True)
 ● In practice, use the bucketing algorithm used in TensorFlow’s translate model (because we’re using v0.12)
-"""
 
+Basically, data is arranged into different inputs 
+- If the length of the sequence (utterance) is shorter than [0] for encode or [1] for decode, then put it in this group
+"""
 CONTRACTIONS = [("i ' m ", "i 'm "), ("' d ", "'d "), ("' s ", "'s "),
                 ("don ' t ", "do n't "), ("didn ' t ", "did n't "), ("doesn ' t ", "does n't "),
                 ("can ' t ", "ca n't "), ("shouldn ' t ", "should n't "), ("wouldn ' t ", "would n't "),
@@ -56,3 +58,5 @@ LR = 0.5
 MAX_GRAD_NORM = 5.0
 
 NUM_SAMPLES = 512
+ENC_VOCAB = 24404
+DEC_VOCAB = 24593
