@@ -15,7 +15,7 @@ import random
 import re
 
 import numpy as np
-from stanford_chatbot import config
+import config
 
 
 def get_lines():
@@ -29,7 +29,7 @@ def get_lines():
             for line in f:
                 parts = line.split(' +++$+++ ')
                 if len(parts) == 5:
-                    if parts[4][-1] == '\n':    # if the sentence goes into the next line, ...
+                    if parts[4][-1] == '\n':    # if \n in the line, remove, ...
                         parts[4] = parts[4][:-1]
                     id2line[parts[0]] = parts[4]
                 i += 1
@@ -46,7 +46,7 @@ def get_convos():
             parts = line.split(' +++$+++ ')
             if len(parts) == 4:
                 convo = []
-                for line in parts[3][1:-2].split(', '): # check if should be -2 or -1
+                for line in parts[3][1:-2].split(', '): # -2 because of \n
                     convo.append(line[1:-1])
                 convos.append(convo)
 
@@ -66,21 +66,22 @@ def prepare_dataset(questions, answers):
     # create path to store all the train and test encoder & decoder
     make_dir(config.PROCESSED_PATH)
 
-    # random conversations to create the test set
+    # random conversations to create the test set # randomly select 25000 samples of questions for making test db
     test_ids = random.sample([i for i in range(len(questions))], config.TESTSET_SIZE)
 
     filenames = ['train.enc', 'train.dec', 'test.enc', 'test.dec',]
     files = []
     for filename in filenames:
-        files.append(open(os.path.join(config.PROCESSED_PATH, filename)))
+        # Open file in append mode
+        files.append(open(os.path.join(config.PROCESSED_PATH, filename), 'w+'))
 
     for i in range(len(questions)):
-        if i in test_ids:
-            files[2].write(questions[i] + '\n')
-            files[3].write(answers[i] + '\n')
+        if i in test_ids:   #note: doesn't necessarily follow chronological order as sampling is done randomly
+            files[2].write(questions[i] + '\n') # writes question to encoder
+            files[3].write(answers[i] + '\n')   # writes corresponding reply to decoder
         else:
-            files[0].write(questions[i] + '\n')
-            files[1].write(answers[i] + '\n')
+            files[0].write(questions[i] + '\n') # writes question to encoder
+            files[1].write(answers[i] + '\n')   # writes corresponding reply to decoder
 
     for file in files:
         file.close()
@@ -88,6 +89,9 @@ def prepare_dataset(questions, answers):
 def make_dir(path):
     """ Create a directory if there isn't one already. """
     try:
+        # cwd = os.getcwd()
+        # processed_path = os.path.join(cwd, path)
+        # os.mkdir(processed_path)
         os.mkdir(path)
     except OSError:
         pass
@@ -109,4 +113,149 @@ def basic_tokenizer(line, normalize_digits=True):
             if normalize_digits:
                 token = re.sub(_DIGIT_RE, '#', token)
             words.append(token)
-    return words
+    return words    # tokenized sentence removing useless characters and removing digits
+
+def build_vocab(filename, normalize_digits=True):
+    in_path = os.path.join(config.PROCESSED_PATH, filename) # filenames = ['train.enc', 'train.dec', 'test.enc', 'test.dec',]
+    out_path = os.path.join(config.PROCESSED_PATH, 'vocab.{}'.format(filename[-3:]))
+
+    vocab = {}
+    with open(in_path, 'r') as f:
+        for line in f.readlines():
+            for token in basic_tokenizer(line):
+                if not token in vocab:
+                    vocab[token] = 0
+                vocab[token] += 1   # get the number of times the token (word) is used in the dataset
+
+    sorted_vocab = sorted(vocab, key=vocab.get, reverse=True)
+    with open(out_path, 'w') as f:
+        f.write('<pad>' + '\n') # index 0
+        f.write('<unk>' + '\n') # index 1
+        f.write('<s>' + '\n')   # index 2
+        f.write('<\s>' + '\n')  # index 3
+        index = 4
+        for word in sorted_vocab:
+            if vocab[word] < config.THRESHOLD:  # if word seen less than two times in whole dataset, skip
+                break
+            f.write(word + '\n')
+            index += 1
+        with open('config.py', 'a') as cf:  # write to config.py
+            if filename[-3:] == 'enc':
+                cf.write('\nENC_VOCAB = ' + str(index) + '\n')
+            else:
+                cf.write('DEC_VOCAB = ' + str(index) + '\n')
+
+def load_vocab(vocab_path):
+    with open(vocab_path, 'r') as f:
+        words = f.read().splitlines()
+    # return words and its index, based on sorted position with most frequent having lowest index
+    return words, {words[i]: i for i in range(len(words))}
+
+def sentence2id(vocab, line):
+    # return the index of the token from the vocab. If token not found in vocab, return that for 'unk'
+    return [vocab.get(token, vocab['<unk>']) for token in basic_tokenizer(line)]
+
+def token2id(data, mode):
+    """ Convert all the tokens in the data into their corresponding index in the vocabulary."""
+    vocab_path = 'vocab.' + mode    # vocabulary
+    in_path = data + '.' + mode     # train data (conversations)
+    out_path = data + '_ids.' + mode
+
+    _, vocab = load_vocab(os.path.join(config.PROCESSED_PATH, vocab_path))
+    in_file = open(os.path.join(config.PROCESSED_PATH, in_path), 'r')
+    out_file = open(os.path.join(config.PROCESSED_PATH, out_path), 'w')
+
+    lines = in_file.read().splitlines()
+    # create an indexed conversation
+    for line in lines:
+        if mode == 'dec':   # we only care about '<s>' and </s> in encoder
+            ids = [vocab['<s>']]
+        else:
+            ids = []
+        ids.extend(sentence2id(vocab, line))
+        if mode == 'dec':
+            ids.append(vocab['<\s>'])
+        out_file.write(' '.join(str(id_) for id_ in ids) + '\n')
+
+def prepare_raw_data():
+    print('Preparing raw data into train set and test set')
+    id2line = get_lines()
+    convos = get_convos()
+    questions, answers = question_answers(id2line, convos)
+    prepare_dataset(questions, answers)
+
+def process_data():
+    print('Preparing data to be model-ready ...')
+    build_vocab('train.enc')
+    build_vocab('train.dec')
+    token2id('train', 'enc')
+    token2id('train', 'dec')
+    token2id('test', 'enc')
+    token2id('test', 'dec')
+
+def load_data(enc_filename, dec_filename, max_training_size=None):
+    encode_file = open(os.path.join(config.PROCESSED_PATH, enc_filename), 'r')
+    decode_file = open(os.path.join(config.PROCESSED_PATH, dec_filename), 'r')
+    encode, decode = encode_file.readline(), decode_file.readline()     # read first line in test_ids.enc and test_ids.dec (or train_ids)
+    data_buckets = [[] for _ in config.BUCKETS] # create empty list for the number of lists in config.BUCKETS
+    i = 0
+    while encode and decode:
+        if (i + 1) % 10000 == 0:
+            print("Bucketing conversation number", i)
+        encode_ids = [int(id_) for id_ in encode.split()]
+        decode_ids = [int(id_) for id_ in decode.split()]
+        # BUCKETS = [(19, 19), (28, 28), (33, 33), (40, 43), (50, 53), (60, 63)]
+        for bucket_id, (encode_max_size, decode_max_size) in enumerate(config.BUCKETS):
+            # 'and', it only takes if encoder and decoder are similar lengths
+            if len(encode_ids) <= encode_max_size and len(decode_ids) <= decode_max_size:
+                data_buckets[bucket_id].append([encode_ids, decode_ids])
+                break   # only perform for one loop
+        encode, decode = encode_file.readline(), decode_file.readline()
+        i += 1
+    return data_buckets
+
+def _pad_input(input_, size):
+    return input_ + [config.PAD_ID] * (size - len(input_))
+
+def _reshape_batch(inputs, size, batch_size):
+    """ Create batch-major inputs. Batch inputs are just re-indexed inputs """
+    batch_inputs = []
+    for length_id in range(size):
+        batch_inputs.append(np.array([inputs[batch_id][length_id] for batch_id in range(batch_size)],
+                                                                                    dtype=np.int32))
+    return batch_inputs
+
+def get_batch(data_bucket, bucket_id, batch_size=1):
+    """ Return one batch to feed into the model """
+    # only pad to the max length of the bucket
+    encoder_size, decoder_size = config.BUCKETS[bucket_id]
+    encoder_inputs, decoder_inputs = [], []
+
+    for _ in range(batch_size):
+        encoder_input, decoder_input = random.choice(data_bucket)   # choose random input
+        # pad both encoder and decoder, reverse the encoder
+        encoder_inputs.append(list(reversed(_pad_input(encoder_input, encoder_size))))
+        decoder_inputs.append(_pad_input(decoder_input, decoder_size))
+
+    # now create batch-major vectors from the data selected above
+    batch_encoder_inputs = _reshape_batch(encoder_inputs, encoder_size, batch_size)
+    batch_decoder_inputs = _reshape_batch(decoder_inputs, decoder_size, batch_size)
+
+    # create decoder masks to be 0 for decoders that are padding
+    batch_masks = []
+    for length_id in range(decoder_size):
+        batch_mask = np.ones(batch_size, dtype=np.float32)
+        for batch_id in range(batch_size):
+            # we set mask to 0 if the corresponding target is a PAD symbol.
+            # the corresponding decoder is decoder_input shifted by 1 forward
+            if length_id < decoder_size - 1:
+                target = decoder_inputs[batch_id][length_id + 1]
+            if length_id == decoder_size - 1 or target == config.PAD_ID:
+                batch_mask[batch_id] = 0.0
+        batch_masks.append(batch_mask)
+    return  batch_encoder_inputs, batch_decoder_inputs, batch_masks
+
+
+if __name__ == '__main__':
+    prepare_raw_data()
+    process_data()
