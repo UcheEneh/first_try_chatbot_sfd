@@ -81,11 +81,11 @@ class ChatBotModel:
                       outputs: A list of the same length as decoder_inputs of 2D Tensors with
                         shape [batch_size x num_decoder_symbols] containing the generated
                         outputs.
-                        # For first try this would be: 63 x config.DEC_VOCAB
+                        # this would be: 64 x config.DEC_VOCAB
 
                       state: The state of each decoder cell at the final time-step.
                         It is a 2D Tensor of shape [batch_size x cell.state_size]
-                        # 63 x config.HIDDEN_SIZE
+                        # 64 x config.HIDDEN_SIZE
             """
 
             # Info on setattr()
