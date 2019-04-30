@@ -178,10 +178,15 @@ def train():
                     start = time.time()
                 sys.stdout.flush()
 
+            # My DEBUG
+            if iteration == 15000:
+                stop = "here"
+
 
 def _get_user_input():
     """ Get user's input which will be transformed into encoder input later """
     print("> ", end="")
+    # sys.stdout.write("> ")
     sys.stdout.flush()
     return sys.stdin.readline()
 
@@ -200,6 +205,25 @@ def _construct_response(output_logits, inv_dec_vocab):
     """
     print(output_logits[0])
     outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits]
+
+    """
+    # Remove most likely answer and select second best
+    output_logits_v2 = output_logits
+    for x in range(3):
+        outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits_v2]
+        for index, logit in zip(outputs, output_logits_v2):
+            # logit.pop(index)
+            np.delete(logit, index)
+    outputs_v2 = [int(np.argmax(logit, axis=1)) for logit in output_logits_v2]
+
+    # If there is an EOS symbol in outputs, cut them at that point
+    if config.EOS_ID in outputs_v2:
+        outputs_v2 = outputs_v2[:outputs_v2.index(config.EOS_ID)]
+    # Print out sentence corresponding to outputs
+    # Convert from numbers to words
+    return " ".join([tf.compat.as_str(inv_dec_vocab[output]) for output in outputs_v2])
+    """
+
     # If there is an EOS symbol in outputs, cut them at that point
     if config.EOS_ID in outputs:
         outputs = outputs[:outputs.index(config.EOS_ID)]
@@ -218,7 +242,7 @@ def chat():
 
     saver = tf.train.Saver()
 
-    with tf.Session as sess:
+    with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         _check_restore_parameters(sess, saver)
         output_file = open(os.path.join(config.PROCESSED_PATH, config.OUTPUT_FILE), 'a+')
